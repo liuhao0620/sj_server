@@ -1,5 +1,5 @@
 CPP=g++
-CPPFLAGS= -std=c++11
+CPPFLAGS= -g -std=c++11
 INCS= -I../common/net -I../common/include
 TARGET=fight_gs
 OBJS=fight_game_server.o

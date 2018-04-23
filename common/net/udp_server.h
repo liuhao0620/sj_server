@@ -38,24 +38,24 @@ namespace sj
             sockaddr_in addr;
             uv_loop_t *_loop = uv_default_loop();
             int ret_code = uv_ip4_addr(ip, port, &addr);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
             ret_code = uv_udp_init(_loop, &_server);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
             ret_code = uv_udp_bind(&_server, (const sockaddr *)&addr, 0);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
             ret_code = uv_udp_recv_start(&_server, 
                 udp_server::AllocCb,
                 udp_server::RecvCb);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
 
             ret_code = uv_run(_loop, UV_RUN_DEFAULT);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
             return 0;
         }
         int Stop()
         {
             int ret_code = uv_udp_recv_stop(&_server);
-            assert(ret_code != 0);
+            assert(ret_code == 0);
             return 0;
         }
 
