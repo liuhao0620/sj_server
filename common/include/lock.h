@@ -18,6 +18,19 @@ namespace sj
         uv_rwlock_t _lock;
     };
 
+	class mutex_lock
+	{
+	public:
+		mutex_lock() { uv_mutex_init(&_lock); }
+		~mutex_lock() { uv_mutex_destroy(&_lock); }
+
+		void Lock() { uv_mutex_lock(&_lock); }
+		void Unlock() { uv_mutex_unlock(&_lock); }
+
+	private:
+		uv_mutex_t _lock;
+	};
+
     class rw_lock_rguard
     {
     public:
@@ -35,5 +48,14 @@ namespace sj
     private:
         rw_lock& _lock;
     };
+
+	class mutex_lock_guard
+	{
+	public:
+		mutex_lock_guard(mutex_lock& l) : _lock(l) { _lock.Lock(); }
+		~mutex_lock_guard() { _lock.Unlock(); }
+	private:
+		mutex_lock& _lock;
+	};
 
 }

@@ -3,7 +3,7 @@
 class test_us_handle : public sj::udp_server_handle
 {
 public:
-    void OnRecv(unid_t sid, char* buf, size_t len)
+    void OnRecv(sj::udp_server* server, unid_t sid, char* buf, size_t len)
     {}
 };
 
