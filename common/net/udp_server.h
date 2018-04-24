@@ -1,6 +1,6 @@
 #pragma once
 #include <map>
-#include <assert.h>
+#include <iostream>
 #include "uv.h"
 #include "common_def.h"
 #include "lock.h"
@@ -42,25 +42,37 @@ namespace sj
             sockaddr_in addr;
             uv_loop_t *_loop = uv_default_loop();
             int ret_code = uv_ip4_addr(ip, port, &addr);
-            assert(ret_code == 0);
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_init(_loop, &_server);
-            assert(ret_code == 0);
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_bind(&_server, (const sockaddr *)&addr, 0);
-            assert(ret_code == 0);
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_recv_start(&_server, 
                 udp_server::AllocCb,
                 udp_server::RecvCb);
-            assert(ret_code == 0);
-
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_run(_loop, UV_RUN_DEFAULT);
-            assert(ret_code == 0);
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             return 0;
         }
         
 		int Stop()
         {
             int ret_code = uv_udp_recv_stop(&_server);
-            assert(ret_code == 0);
+			std::cout << ret_code << std::endl;
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
+			uv_close((uv_handle_t *)&_server, udp_server::CloseCb);
             rw_lock_wguard _l(_session_map_lock);
 			for (map_sid_session_t::iterator iter = _sid_session_map.begin();
 				iter != _sid_session_map.end();
@@ -102,10 +114,15 @@ namespace sj
 			{
 				uwh->_server->AddSession(addr, session);
 			}
-			assert(session != NULL);
+			ASSERT(session != NULL);
             uwh->_handle->OnRecv(uwh->_server, session->sid, rcvbuf->base, nread);
             delete rcvbuf->base;
         }
+
+		static void CloseCb(uv_handle_t* handle) 
+		{
+			uv_is_closing(handle);
+		}
 
 		bool FindSession(const unid_t sid, udp_session*& session)
 		{
