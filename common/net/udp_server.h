@@ -1,6 +1,5 @@
 #pragma once
 #include <map>
-#include <iostream>
 #include "uv.h"
 #include "common_def.h"
 #include "lock.h"
@@ -21,7 +20,7 @@ namespace sj
         virtual void OnRecv(udp_server* server, unid_t sid, char* buf, size_t len) = 0;
     };
 
-    struct udp_t_with_handle : public uv_udp_t
+    struct udp_server_t_with_handle : public uv_udp_t
     {
         udp_server_handle* _handle;
 		udp_server* _server;
@@ -40,27 +39,21 @@ namespace sj
 		int StartUp(const char* ip, int port)
         {
             sockaddr_in addr;
-            uv_loop_t *_loop = uv_default_loop();
             int ret_code = uv_ip4_addr(ip, port, &addr);
-			std::cout << ret_code << std::endl;
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_init(_loop, &_server);
-			std::cout << ret_code << std::endl;
+            ret_code = uv_udp_init(uv_default_loop(), &_server);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_bind(&_server, (const sockaddr *)&addr, 0);
-			std::cout << ret_code << std::endl;
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_recv_start(&_server, 
                 udp_server::AllocCb,
                 udp_server::RecvCb);
-			std::cout << ret_code << std::endl;
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_run(_loop, UV_RUN_DEFAULT);
-			std::cout << ret_code << std::endl;
+            ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             return 0;
@@ -69,7 +62,6 @@ namespace sj
 		int Stop()
         {
             int ret_code = uv_udp_recv_stop(&_server);
-			std::cout << ret_code << std::endl;
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
 			uv_close((uv_handle_t *)&_server, udp_server::CloseCb);
@@ -108,7 +100,7 @@ namespace sj
 			{
 				return;
 			}
-			udp_t_with_handle* uwh = static_cast<udp_t_with_handle *>(handle); 
+			udp_server_t_with_handle* uwh = static_cast<udp_server_t_with_handle *>(handle); 
             udp_session* session = NULL;
             if (!uwh->_server->FindSession(addr, session))
 			{
@@ -189,6 +181,6 @@ namespace sj
         map_addr_session_t _addr_session_map;
         rw_lock _session_map_lock;
 
-        udp_t_with_handle _server;
+        udp_server_t_with_handle _server;
     };
 }
