@@ -10,7 +10,10 @@ namespace sj
     struct udp_session
     {
         unid_t sid;
-        const sockaddr* addr;
+		union{
+			sockaddr addr;
+			unid_t addr_id;
+		}addr;
     };
 
 	class udp_server;
@@ -58,6 +61,26 @@ namespace sj
 			if (ret_code != 0) { return ret_code; }
             return 0;
         }
+
+		int Send(unid_t sid, const char * buf, size_t len)
+		{
+			udp_session* session;
+			if (!FindSession(sid, session))
+			{
+				//sid 不存在
+				return -1;
+			}
+			uv_udp_send_t* req = new uv_udp_send_t;
+            uv_buf_t msg = uv_buf_init((char*)buf, len);
+            int ret_code = uv_udp_send(req,
+                  &_server,
+                  &msg,
+                  1,
+                  (const sockaddr*) &session->addr.addr,
+                  udp_server::SendCb);
+            ASSERT(ret_code == 0);
+			return 0;
+		}
         
 		int Stop()
         {
@@ -111,6 +134,11 @@ namespace sj
             delete rcvbuf->base;
         }
 
+        static void SendCb(uv_udp_send_t* req, int status)
+        {
+			delete req;
+        }
+
 		static void CloseCb(uv_handle_t* handle) 
 		{
 			uv_is_closing(handle);
@@ -131,7 +159,8 @@ namespace sj
 		bool FindSession(const sockaddr* addr, udp_session*& session)
 		{
 			rw_lock_rguard _l(_session_map_lock);
-			map_addr_session_t::iterator iter = _addr_session_map.find(addr);
+			unid_t addr_id = *(unid_t *)addr;
+			map_addr_session_t::iterator iter = _addr_session_map.find(addr_id);
 			if (iter == _addr_session_map.end())
 			{
 				return false;
@@ -145,7 +174,8 @@ namespace sj
 		bool AddSession(const sockaddr* addr, udp_session*& session)
 		{
 			rw_lock_wguard _l(_session_map_lock);
-			map_addr_session_t::iterator iter = _addr_session_map.find(addr);
+			unid_t addr_id = *(unid_t *)addr;
+			map_addr_session_t::iterator iter = _addr_session_map.find(addr_id);
 			if (iter != _addr_session_map.end())
 			{
 				session = iter->second;
@@ -153,9 +183,9 @@ namespace sj
 			}
 			session = new udp_session;
 			session->sid = GetUniqueID(UIT_UDP_SID);
-			session->addr = addr;
+			session->addr.addr_id = addr_id;
 			_sid_session_map.insert(std::make_pair(session->sid, session));
-			_addr_session_map.insert(std::make_pair(session->addr, session));
+			_addr_session_map.insert(std::make_pair(session->addr.addr_id, session));
 			return true;
 		}
 
@@ -168,7 +198,7 @@ namespace sj
 			{
 				return false;
 			}
-			_addr_session_map.erase(iter->second->addr);
+			_addr_session_map.erase(iter->second->addr.addr_id);
 			delete iter->second;
 			_sid_session_map.erase(sid);
 			return true;
@@ -176,7 +206,7 @@ namespace sj
 
     private:
         typedef std::map<unid_t, udp_session*> map_sid_session_t;
-        typedef std::map<const sockaddr*, udp_session*> map_addr_session_t;
+        typedef std::map<unid_t, udp_session*> map_addr_session_t;
         map_sid_session_t _sid_session_map;
         map_addr_session_t _addr_session_map;
         rw_lock _session_map_lock;

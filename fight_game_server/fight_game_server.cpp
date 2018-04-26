@@ -7,6 +7,7 @@ public:
     void OnRecv(sj::udp_server* server, unid_t sid, char* buf, size_t len)
     {
         std::cout << "recv " << buf << " from " << sid << std::endl;
+        server->Send(sid, "PONG", 4);
     }
 };
 
