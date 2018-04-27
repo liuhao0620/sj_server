@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <vector>
 #include "uv.h"
 #include "common_def.h"
 #include "lock.h"
@@ -68,12 +69,13 @@ namespace sj
 
 		int Send(unid_t sid, const char * buf, size_t len)
 		{
-			udp_session* session;
+			udp_session* session = NULL;
 			if (!FindSession(sid, session))
 			{
 				//sid 不存在
 				return -1;
 			}
+			ASSERT(session != NULL);
 			uv_udp_send_t* req = new uv_udp_send_t;
             uv_buf_t msg = uv_buf_init((char*)buf, len);
             int ret_code = uv_udp_send(req,
@@ -83,6 +85,50 @@ namespace sj
                   (const sockaddr*) &session->addr.addr,
                   udp_server::SendCb);
             ASSERT(ret_code == 0);
+			if (ret_code != 0) return ret_code;
+			return 0;
+		}
+
+		int Broadcast(std::vector<unid_t> sids, const char * buf, size_t len)
+		{
+            uv_buf_t msg = uv_buf_init((char*)buf, len);
+			for (size_t i = 0; i < sids.size(); ++ i)
+			{
+				udp_session* session = NULL;
+				if (!FindSession(sid, session)) { continue; }
+				ASSERT(session != NULL);
+				uv_udp_send_t* req = new uv_udp_send_t;
+				int ret_code = uv_udp_send(req,
+					&_server,
+					&msg,
+					1,
+					(const sockaddr*) &session->addr.addr,
+					udp_server::SendCb);
+				ASSERT(ret_code == 0);
+				if (ret_code != 0) { continue; }
+			}
+			return 0;
+		}
+
+		int Broadcast(const char * buf, size_t len)
+		{
+			uv_buf_t msg = uv_buf_init((char*)buf, len);
+			for (map_sid_session_t::iterator iter = _sid_session_map.begin(); 
+				iter != _sid_session_map.end(); ++ iter)
+			{
+				udp_session* session = iter->second;
+				ASSERT(session != NULL);
+				if (session == NULL) { continue; }
+				uv_udp_send_t* req = new uv_udp_send_t;
+				int ret_code = uv_udp_send(req,
+					&_server,
+					&msg,
+					1,
+					(const sockaddr*) &session->addr.addr,
+					udp_server::SendCb);
+				ASSERT(ret_code == 0);
+				if (ret_code != 0) { continue; }
+			}
 			return 0;
 		}
         

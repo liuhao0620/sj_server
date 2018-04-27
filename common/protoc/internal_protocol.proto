@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+enum INTERNAL_PROTOCOL_TYPE
+{
+    IPT_ipt_test = 0;
+}
+
+message ipt_test
+{
+    INTERNAL_PROTOCOL_TYPE type = 1;
+    bytes somewords = 2;
+}

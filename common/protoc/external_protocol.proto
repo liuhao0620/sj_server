@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+enum EXTERNAL_PROTOCOL_TYPE
+{
+    EPT_ept_test = 0;
+}
+
+message ept_test
+{
+    EXTERNAL_PROTOCOL_TYPE type = 1;
+    bytes somewords = 2;
+}
