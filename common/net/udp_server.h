@@ -56,7 +56,11 @@ namespace sj
                 udp_server::RecvCb);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+			// ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+            ret_code = uv_queue_work(uv_default_loop(), 
+				new uv_work_t, 
+				udp_server::Run,
+				udp_server::AfterRun);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             return 0;
@@ -142,6 +146,16 @@ namespace sj
 		static void CloseCb(uv_handle_t* handle) 
 		{
 			uv_is_closing(handle);
+		}
+
+		static void Run(uv_work_t * req)
+		{
+			ASSERT(uv_run(uv_default_loop(), UV_RUN_DEFAULT) == 0);
+		}
+
+		static void AfterRun(uv_work_t * req, int status)
+		{
+
 		}
 
 		bool FindSession(const unid_t sid, udp_session*& session)

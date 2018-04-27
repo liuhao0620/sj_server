@@ -9,6 +9,7 @@ namespace sj
     {
     public:
         virtual void OnRecv(udp_client* client, char* buf, size_t len) = 0;
+        // virtual void OnSent(udp_client* client, char* buf, size_t len) = 0;
     };
 
     struct udp_client_t_with_handle : public uv_udp_t
@@ -17,7 +18,7 @@ namespace sj
 		udp_client* _client;
     };
 
-    struct udp_send_t_with_handle : public uv_udp_send_t
+    struct udp_client_send_t_with_handle : public uv_udp_send_t
     {
         udp_client_handle* _handle;
 		udp_client* _client;
@@ -37,18 +38,33 @@ namespace sj
         {
             int ret_code = uv_ip4_addr(ip, port, &_server_addr);
             ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_ip4_addr("0.0.0.0", send_port, &_client_addr);
             ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_init(uv_default_loop(), &_client);
             ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             ret_code = uv_udp_bind(&_client, (const sockaddr *)&_client_addr, 0);
             ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
+            ret_code = uv_udp_recv_start(&_client, 
+                udp_client::AllocCb,
+                udp_client::RecvCb);
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
+            ret_code = uv_queue_work(uv_default_loop(), 
+				new uv_work_t, 
+				udp_client::Run,
+				udp_client::AfterRun);
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
             return 0;
         }
 
         int Send(const char* buf, size_t len)
         {
-            udp_send_t_with_handle* req = new udp_send_t_with_handle;
+            udp_client_send_t_with_handle* req = new udp_client_send_t_with_handle;
             req->_handle = _client._handle;
             req->_client = this;
             uv_buf_t msg = uv_buf_init((char*)buf, len);
@@ -100,17 +116,24 @@ namespace sj
 
         static void SendCb(uv_udp_send_t* req, int status)
         {
-            udp_send_t_with_handle* uswh = static_cast<udp_send_t_with_handle*>(req);
-            int ret_code = uv_udp_recv_start(&uswh->_client->_client, 
-                udp_client::AllocCb,
-                udp_client::RecvCb);
-            ASSERT(ret_code == 0);
+            // udp_client_send_t_with_handle* uswh = static_cast<udp_client_send_t_with_handle*>(req);
+            // uswh->_handle->OnSent(uswh->_client, uswh->bufs[0].base, uswh->bufs[0].len);
             delete req;
         }
 
 		static void CloseCb(uv_handle_t* handle) 
 		{
 			uv_is_closing(handle);
+		}
+
+		static void Run(uv_work_t * req)
+		{
+			ASSERT(uv_run(uv_default_loop(), UV_RUN_DEFAULT) == 0);
+		}
+
+		static void AfterRun(uv_work_t * req, int status)
+		{
+
 		}
 
     private:
