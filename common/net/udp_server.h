@@ -95,7 +95,7 @@ namespace sj
 			for (size_t i = 0; i < sids.size(); ++ i)
 			{
 				udp_session* session = NULL;
-				if (!FindSession(sid, session)) { continue; }
+				if (!FindSession(sids[i], session)) { continue; }
 				ASSERT(session != NULL);
 				uv_udp_send_t* req = new uv_udp_send_t;
 				int ret_code = uv_udp_send(req,
