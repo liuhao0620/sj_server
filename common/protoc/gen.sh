@@ -1,3 +1,4 @@
 rm -rf ./gprotoc/
 mkdir gprotoc
-ls *.proto | xargs -iPATH protoc PATH --cpp_out=./gprotoc/
+protoc internal_protocol.proto --cpp_out=./gprotoc/
+protoc external_protocol.proto --cpp_out=./gprotoc/

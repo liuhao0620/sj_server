@@ -1,6 +1,7 @@
-#include "udp_client.h"
 #include <iostream>
 #include <unistd.h>
+#include "udp_client.h"
+#include "proto_buf.h"
 
 class test_uc_handle : public sj::udp_client_handle
 {
@@ -21,9 +22,13 @@ int main(int argc, char ** argv)
     while (true)
     {
         //主循环
-        std::string cmd;
-        std::cin >> cmd;
-        test_client.Send(cmd.c_str(), cmd.size());
+        std::string str;
+        std::cin >> str;
+        MAKE_PB(ept_test, cmd)
+        cmd.set_somewords(str);
+        PB2STR(cmd, send_str)
+        std::cout << send_str.size() << " " << send_str << std::endl;
+        test_client.Send(send_str.c_str(), send_str.size());
         sleep(5);
     }
     test_client.Close();

@@ -1,6 +1,6 @@
 CPP=g++
 CPPFLAGS= -g -std=c++11
-INCS= -I../common/net -I../common/include -I../common/protoc -I../common/protoc/gprotoc
+INCS= -I../common/net -I../common/include -I../common/protoc
 TARGET=fight_gs
 OBJS=fight_game_server.o
 LIBS=/usr/local/lib/libuv.a /usr/local/lib/libprotobuf.a -lpthread

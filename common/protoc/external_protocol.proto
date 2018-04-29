@@ -1,8 +1,18 @@
 syntax = "proto3";
+package PB;
 
 enum EXTERNAL_PROTOCOL_TYPE
 {
-    EPT_ept_test = 0;
+    PT_ept_null = 0;
+    PT_ept_min_index = 1;
+    PT_ept_test = 2;
+    PT_ept_max_index = 10000;
+}
+
+message proto_buf
+{
+    int32 pb_type = 1;
+    bytes pb_data = 2;
 }
 
 message ept_test

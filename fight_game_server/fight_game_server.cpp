@@ -1,13 +1,15 @@
-#include "udp_server.h"
 #include <iostream>
 #include <unistd.h>
+#include "udp_server.h"
+#include "proto_buf.h"
 
 class test_us_handle : public sj::udp_server_handle
 {
 public:
     void OnRecv(sj::udp_server* server, unid_t sid, char* buf, size_t len)
     {
-        std::cout << "recv " << buf << " from " << sid << std::endl;
+        ARRAY2PB(buf, len, proto_buf, cmd)
+        std::cout << "recv type : " << cmd.pb_type() << " from " << sid << std::endl;
         server->Send(sid, "PONG", 4);
     }
 };
