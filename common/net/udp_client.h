@@ -1,6 +1,7 @@
 #pragma once
 #include "uv.h"
 #include "common_def.h"
+#include "simple_logger.h"
 
 namespace sj
 {
@@ -69,14 +70,14 @@ namespace sj
             req->_client = this;
             uv_buf_t msg = uv_buf_init((char*)buf, len);
             int ret_code = uv_udp_send(req,
-                  &_client,
-                  &msg,
-                  1,
-                  (const sockaddr*) &_server_addr,
-                  udp_client::SendCb);
+                    &_client,
+                    &msg,
+                    1,
+                    (const sockaddr*) &_server_addr,
+                    udp_client::SendCb);
             ASSERT(ret_code == 0);
-            ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-            ASSERT(ret_code == 0);
+            // ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+            // ASSERT(ret_code == 0);
             return 0;
         }
 
@@ -116,6 +117,7 @@ namespace sj
 
         static void SendCb(uv_udp_send_t* req, int status)
         {
+            LOG_DEBUG("send success");
             // udp_client_send_t_with_handle* uswh = static_cast<udp_client_send_t_with_handle*>(req);
             // uswh->_handle->OnSent(uswh->_client, uswh->bufs[0].base, uswh->bufs[0].len);
             delete req;
@@ -133,7 +135,7 @@ namespace sj
 
 		static void AfterRun(uv_work_t * req, int status)
 		{
-
+            delete req;
 		}
 
     private:

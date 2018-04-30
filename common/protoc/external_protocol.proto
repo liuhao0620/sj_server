@@ -6,6 +6,8 @@ enum EXTERNAL_PROTOCOL_TYPE
     PT_ept_null = 0;
     PT_ept_min_index = 1;
     PT_ept_test = 2;
+    PT_ept_enter_room = 3;
+    PT_ept_frame_pbs = 4;
     PT_ept_max_index = 10000;
 }
 
@@ -13,10 +15,25 @@ message proto_buf
 {
     int32 pb_type = 1;
     bytes pb_data = 2;
+    uint64 from_id = 3;      //服务器下发帧操作时,此字段会被赋值
 }
 
 message ept_test
 {
     EXTERNAL_PROTOCOL_TYPE type = 1;
     bytes somewords = 2;
+}
+
+message ept_enter_room
+{
+    EXTERNAL_PROTOCOL_TYPE type = 1;
+    int64 room_id = 2;    
+}
+
+message ept_frame_pbs   //每一帧的所有操作
+{
+    EXTERNAL_PROTOCOL_TYPE type = 1;
+    int32 frame_idx = 2;
+    int64 room_id = 3;
+    repeated proto_buf pbs = 4;
 }

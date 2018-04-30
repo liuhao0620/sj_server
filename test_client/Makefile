@@ -1,6 +1,6 @@
 CPP=g++
 CPPFLAGS= -g -std=c++11
-INCS= -I../common/net -I../common/include -I../common/protoc
+INCS= -I../common/net -I../common/include -I../common/log -I../common/protoc
 TARGET=test_client
 OBJS=test_client.o
 LIBS=/usr/local/lib/libuv.a /usr/local/lib/libprotobuf.a -lpthread

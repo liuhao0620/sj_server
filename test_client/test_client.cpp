@@ -22,11 +22,16 @@ int main(int argc, char ** argv)
     while (true)
     {
         //主循环
+        std::cout << "please enter your command:" << std::endl;
         std::string str;
         std::cin >> str;
         MAKE_PB(ept_test, cmd)
         cmd.set_somewords(str);
-        PB2STR(cmd, send_str)
+        PB2STR(cmd, data_str, )
+        PB::proto_buf send_pb;
+        send_pb.set_pb_type(cmd.type());
+        send_pb.set_pb_data(data_str);
+        PB2STR(send_pb, send_str, )
         std::cout << send_str.size() << " " << send_str << std::endl;
         test_client.Send(send_str.c_str(), send_str.size());
         sleep(5);
