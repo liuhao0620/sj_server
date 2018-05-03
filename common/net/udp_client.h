@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include "uv.h"
 #include "common_def.h"
 #include "simple_logger.h"
@@ -25,6 +26,12 @@ namespace sj
 		udp_client* _client;
     };
 
+    struct udp_async_send_param
+    {
+        udp_client* _client;
+        std::string _msg;
+    };
+
     class udp_client
     {
     public:
@@ -37,7 +44,12 @@ namespace sj
 
         int StartUp(const char * ip, int port, int send_port)
         {
-            int ret_code = uv_ip4_addr(ip, port, &_server_addr);
+            int ret_code = uv_async_init(uv_default_loop(), 
+                &_async_send, 
+                udp_client::AsyncSend);
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
+            ret_code = uv_ip4_addr(ip, port, &_server_addr);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             ret_code = uv_ip4_addr("0.0.0.0", send_port, &_client_addr);
@@ -54,16 +66,32 @@ namespace sj
                 udp_client::RecvCb);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_queue_work(uv_default_loop(), 
-				new uv_work_t, 
-				udp_client::Run,
-				udp_client::AfterRun);
+            ret_code = uv_thread_create(&_thread, udp_client::Run, NULL);
             ASSERT(ret_code == 0);
 			if (ret_code != 0) { return ret_code; }
             return 0;
         }
 
         int Send(const char* buf, size_t len)
+        {
+            udp_async_send_param* param = new udp_async_send_param;
+            param->_client = this;
+            param->_msg = std::string(buf, len);
+            _async_send.data = param;
+            int ret_code = uv_async_send(&_async_send);
+            ASSERT(ret_code == 0);
+			if (ret_code != 0) { return ret_code; }
+            return 0;
+        }
+
+        int Close()
+        {
+			uv_close((uv_handle_t *)&_client, udp_client::CloseCb);
+            return 0;
+        }
+
+    private:
+        int SendInl(const char* buf, size_t len)
         {
             udp_client_send_t_with_handle* req = new udp_client_send_t_with_handle;
             req->_handle = _client._handle;
@@ -78,12 +106,6 @@ namespace sj
             ASSERT(ret_code == 0);
             // ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
             // ASSERT(ret_code == 0);
-            return 0;
-        }
-
-        int Close()
-        {
-			uv_close((uv_handle_t *)&_client, udp_client::CloseCb);
             return 0;
         }
 
@@ -128,19 +150,28 @@ namespace sj
 			uv_is_closing(handle);
 		}
 
-		static void Run(uv_work_t * req)
+		static void Run(void* data)
 		{
-			ASSERT(uv_run(uv_default_loop(), UV_RUN_DEFAULT) == 0);
+            int ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+			ASSERT(ret_code == 0);
+            if (ret_code != 0)
+            {
+                LOG_ERROR("uv_run error : ", ret_code);
+            }
 		}
 
-		static void AfterRun(uv_work_t * req, int status)
-		{
-            delete req;
-		}
+        static void AsyncSend(uv_async_t* handle)
+        {
+            udp_async_send_param* param = (udp_async_send_param*)handle->data;
+            param->_client->SendInl(param->_msg.c_str(), param->_msg.size());
+            delete param;
+        }
 
     private:
         sockaddr_in _server_addr;
         sockaddr_in _client_addr;
         udp_client_t_with_handle _client;
+        uv_thread_t _thread;
+        uv_async_t _async_send;
     };
 }
