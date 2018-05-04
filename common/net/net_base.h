@@ -68,6 +68,7 @@ namespace sj
             if (data - _start_pointer >= MAXSIZE)
             {
                 delete data;
+                return;
             }
             mutex_lock_guard l(_lock);
             _dd.push_back(data);
