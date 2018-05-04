@@ -1,8 +1,5 @@
 #pragma once
-#include <string>
-#include "uv.h"
-#include "common_def.h"
-#include "simple_logger.h"
+#include "net_base.h"
 
 namespace sj
 {
@@ -10,168 +7,225 @@ namespace sj
     class udp_client_handle
     {
     public:
-        virtual void OnRecv(udp_client* client, char* buf, size_t len) = 0;
-        // virtual void OnSent(udp_client* client, char* buf, size_t len) = 0;
+        virtual void OnRecv(udp_client * client, char * buf, size_t len) = 0;
+        virtual void OnSent(udp_client * client, char * buf, size_t len) = 0;
     };
 
-    struct udp_client_t_with_handle : public uv_udp_t
+    struct udp_client_config
     {
-        udp_client_handle* _handle;
-		udp_client* _client;
+        std::string _server_ip;     // 连接的服务器IP地址
+        int _server_port;           // 连接的服务器端口
+        int _port;                  // 本机发送和接收端口
+        std::string _name;          // 客户端名称
     };
 
-    struct udp_client_send_t_with_handle : public uv_udp_send_t
-    {
-        udp_client_handle* _handle;
-		udp_client* _client;
-    };
-
-    struct udp_async_send_param
-    {
-        udp_client* _client;
-        std::string _msg;
-    };
+#define CHECK_ERR_CODE \
+    if (err_code != 0) \
+    { \
+        _err_info = GetErrorInfo(err_code); \
+        return err_code; \
+    }    
 
     class udp_client
     {
+    private:
+        struct uv_udp_t_with_client : public uv_udp_t
+        {
+            udp_client * _client;
+        };
+
+        struct send_recv_buf
+        {
+            char _buf[UDP_BUF_MAX_SIZE];
+            udp_client * _client;
+            size_t _len;
+        };
+
+        struct send_param : public uv_udp_send_t
+        {
+            send_recv_buf * _send_buf;
+        };
     public:
-        int Init(udp_client_handle* uch)
+        udp_client()
         {
-            _client._handle = uch;
             _client._client = this;
+            _handle = NULL;
+            uv_loop_init(&_loop);
+        }
+
+        ~udp_client()
+        {
+            uv_loop_close(&_loop);
+        }
+
+    public:
+        bool Init(udp_client_config& cfg)
+        {
+            _config._server_ip = cfg._server_ip;
+            _config._server_port = cfg._server_port;
+            _config._port = cfg._port;
+            _config._name = cfg._name;
+            return true;
+        }
+
+        void SetHandle(udp_client_handle* uch)
+        {
+            _handle = uch;
+        }
+
+        int StartUp()
+        {
+            if (_handle == NULL)
+            {
+                _err_info = "no hanle";
+                return -1;
+            }
+            int err_code = uv_async_init(&_loop, &_async_send, udp_client::AsyncSend);
+            CHECK_ERR_CODE
+            err_code = uv_async_init(&_loop, &_async_close, udp_client::AsyncClose);
+            CHECK_ERR_CODE
+            err_code = uv_ip4_addr(_config._server_ip.c_str(), _config._server_port, &_server_addr);
+            CHECK_ERR_CODE
+            err_code = uv_ip4_addr("0.0.0.0", _config._port, &_self_addr);
+            CHECK_ERR_CODE
+            err_code = uv_udp_init(&_loop, &_client);
+            CHECK_ERR_CODE
+            err_code = uv_udp_bind(&_client, (const sockaddr *)&_self_addr, 0);
+            CHECK_ERR_CODE
+            err_code = uv_udp_recv_start(&_client, udp_client::AllocCb, udp_client::RecvCb);
+            CHECK_ERR_CODE   
+            err_code = uv_thread_create(&_thread, udp_client::Run, (void *)this);
+            CHECK_ERR_CODE
             return 0;
         }
 
-        int StartUp(const char * ip, int port, int send_port)
+        int Send(const char * buf, size_t len)
         {
-            int ret_code = uv_async_init(uv_default_loop(), 
-                &_async_send, 
-                udp_client::AsyncSend);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_ip4_addr(ip, port, &_server_addr);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_ip4_addr("0.0.0.0", send_port, &_client_addr);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_init(uv_default_loop(), &_client);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_bind(&_client, (const sockaddr *)&_client_addr, 0);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_recv_start(&_client, 
-                udp_client::AllocCb,
-                udp_client::RecvCb);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_thread_create(&_thread, udp_client::Run, NULL);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            return 0;
-        }
-
-        int Send(const char* buf, size_t len)
-        {
-            udp_async_send_param* param = new udp_async_send_param;
-            param->_client = this;
-            param->_msg = std::string(buf, len);
-            _async_send.data = param;
-            int ret_code = uv_async_send(&_async_send);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
+            if (len > UDP_BUF_MAX_SIZE)
+            {
+                _err_info = "send buf is too long";
+                return -1;
+            }
+            send_recv_buf * data = _buf_queue.GetData();
+            data->_client = this;
+            data->_len = len;
+            memmove((void *)data->_buf, (const void *)buf, len);
+            _async_send.data = (void *)data;
+            int err_code = uv_async_send(&_async_send);
+            CHECK_ERR_CODE
             return 0;
         }
 
         int Close()
         {
-			uv_close((uv_handle_t *)&_client, udp_client::CloseCb);
+            _async_close.data = (void *)this;
+            int err_code = uv_async_send(&_async_close);
+            CHECK_ERR_CODE
             return 0;
         }
 
     private:
-        int SendInl(const char* buf, size_t len)
+        void SendInl(send_recv_buf * data)
         {
-            udp_client_send_t_with_handle* req = new udp_client_send_t_with_handle;
-            req->_handle = _client._handle;
-            req->_client = this;
-            uv_buf_t msg = uv_buf_init((char*)buf, len);
-            int ret_code = uv_udp_send(req,
-                    &_client,
-                    &msg,
-                    1,
-                    (const sockaddr*) &_server_addr,
-                    udp_client::SendCb);
-            ASSERT(ret_code == 0);
-            // ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-            // ASSERT(ret_code == 0);
-            return 0;
+            send_param * req = _send_param_queue.GetData();
+            req->_send_buf = data;
+            uv_buf_t msg = uv_buf_init((char*)data->_buf, data->_len);
+            int err_code = uv_udp_send(req,
+                &_client,
+                &msg,
+                1,
+                (const sockaddr*) &_server_addr,
+                udp_client::SendCb);
+            if (err_code != 0)
+            {
+                _err_info = GetErrorInfo(err_code);
+            }
         }
 
     private:
-        static void AllocCb(uv_handle_t* handle, 
+        static void AsyncSend(uv_async_t * handle)
+        {
+            send_recv_buf * data = (send_recv_buf *)handle->data;
+            data->_client->SendInl(data);
+        }
+
+        static void AsyncClose(uv_async_t * handle)
+        {
+            udp_client * client = (udp_client *)handle->data;
+            int err_code = uv_udp_recv_stop(&(client->_client));
+            if (err_code != 0)
+            {
+                client->_err_info = GetErrorInfo(err_code);
+            }
+            uv_close((uv_handle_t *)(&(client->_client)), udp_client::CloseCb);
+        }
+        
+        static void AllocCb(uv_handle_t * handle, 
             size_t suggested_size, 
-            uv_buf_t* buf)
+            uv_buf_t * buf)
         {
-            buf->base = new char[1000];
-            buf->len = 1000;
+            uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
+            send_recv_buf * data = uwc->_client->_buf_queue.GetData();
+            memset((void *)data->_buf, 0, UDP_BUF_MAX_SIZE);
+            buf->base = data->_buf;
+            buf->len = UDP_BUF_MAX_SIZE;
         }
 
-        static void RecvCb(uv_udp_t* handle,
+        static void RecvCb(uv_udp_t * handle,
             ssize_t nread,
-            const uv_buf_t* rcvbuf,
-            const sockaddr* addr,
+            const uv_buf_t * rcvbuf,
+            const sockaddr * addr,
             unsigned flags)
         {
             if (nread <= 0)
             {
                 return;
             }
-			if (handle == NULL)
-			{
-				return;
-			}
-			udp_client_t_with_handle* uwh = static_cast<udp_client_t_with_handle *>(handle); 
-            uwh->_handle->OnRecv(uwh->_client, rcvbuf->base, nread);
-            delete rcvbuf->base;
+            uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
+            uwc->_client->_handle->OnRecv(uwc->_client, rcvbuf->base, nread);
+            send_recv_buf * data = (send_recv_buf *)rcvbuf->base;
+            uwc->_client->_buf_queue.PutData(data);
         }
 
         static void SendCb(uv_udp_send_t* req, int status)
         {
-            LOG_DEBUG("send success");
-            // udp_client_send_t_with_handle* uswh = static_cast<udp_client_send_t_with_handle*>(req);
-            // uswh->_handle->OnSent(uswh->_client, uswh->bufs[0].base, uswh->bufs[0].len);
-            delete req;
+            send_param * param = (send_param *)req;
+            param->_send_buf->_client->_handle->OnSent(param->_send_buf->_client,
+                param->_send_buf->_buf, param->_send_buf->_len);
+            param->_send_buf->_client->_buf_queue.PutData(param->_send_buf);
+            param->_send_buf->_client->_send_param_queue.PutData(param);
         }
 
-		static void CloseCb(uv_handle_t* handle) 
+		static void CloseCb(uv_handle_t * handle) 
 		{
 			uv_is_closing(handle);
 		}
 
-		static void Run(void* data)
+		static void Run(void * data)
 		{
-            int ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-			ASSERT(ret_code == 0);
-            if (ret_code != 0)
+            udp_client * client = (udp_client *)data;
+            int err_code = uv_run(&(client->_loop), UV_RUN_DEFAULT);
+            if (err_code != 0)
             {
-                LOG_ERROR("uv_run error : ", ret_code);
+                client->_err_info = GetErrorInfo(err_code);
             }
 		}
 
-        static void AsyncSend(uv_async_t* handle)
-        {
-            udp_async_send_param* param = (udp_async_send_param*)handle->data;
-            param->_client->SendInl(param->_msg.c_str(), param->_msg.size());
-            delete param;
-        }
-
     private:
-        sockaddr_in _server_addr;
-        sockaddr_in _client_addr;
-        udp_client_t_with_handle _client;
-        uv_thread_t _thread;
+        uv_loop_t _loop;
         uv_async_t _async_send;
+        uv_async_t _async_close;
+        uv_thread_t _thread;
+        sockaddr_in _server_addr;
+        sockaddr_in _self_addr;
+
+        uv_udp_t_with_client _client;
+        udp_client_config _config;
+        udp_client_handle * _handle; 
+        std::string _err_info;
+        
+        data_deque<send_recv_buf, 4> _buf_queue;
+        data_deque<send_param, 4> _send_param_queue;
     };
+#undef CHECK_ERR_CODE
 }
