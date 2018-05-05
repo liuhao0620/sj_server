@@ -1,9 +1,9 @@
 #pragma once
-#include <deque>
 #include <string>
 #include <uv.h>
-#include "common_def.h"
 #include "lock.h"
+
+#define UDP_BUF_MAX_SIZE (1000)
 
 namespace sj
 {
@@ -40,27 +40,25 @@ namespace sj
         data_stack()
         {
             _start_pointer = new DATATYPE[MAXSIZE];
+            _cur_pos = MAXSIZE - 1;
             for (int i = 0; i < MAXSIZE; ++ i)
             {
-                _dd.push_back(_start_pointer + i);
+                _dd[i] = _start_pointer + i;
             }
         }
         ~data_stack()
         {
-            _dd.clear();
             delete _start_pointer;
         }
 
         DATATYPE * GetData()
         {
             mutex_lock_guard l(_lock);
-            if (_dd.empty())
+            if (_cur_pos == 0)
             {
                 return new DATATYPE;
             }
-            DATATYPE * data = _dd.back();
-            _dd.pop_back();
-			return data;
+            return _dd[_cur_pos --];
         }
 
         void PutData(DATATYPE * data)
@@ -71,10 +69,11 @@ namespace sj
                 return;
             }
             mutex_lock_guard l(_lock);
-            _dd.push_back(data);
+            _dd[++ _cur_pos] = data;
         }
     private:
-        std::deque<DATATYPE *> _dd;
+        DATATYPE * _dd[MAXSIZE];
+        int _cur_pos;
         DATATYPE * _start_pointer;
         mutex_lock _lock;
     };
