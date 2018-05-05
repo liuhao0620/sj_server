@@ -106,7 +106,7 @@ namespace sj
                 _err_info = "send buf is too long";
                 return -1;
             }
-            send_recv_buf * data = _buf_queue.GetData();
+            send_recv_buf * data = _buf_stack.GetData();
             data->_client = this;
             data->_len = len;
             memmove((void *)data->_buf, (const void *)buf, len);
@@ -127,7 +127,7 @@ namespace sj
     private:
         void SendInl(send_recv_buf * data)
         {
-            send_param * req = _send_param_queue.GetData();
+            send_param * req = _send_param_stack.GetData();
             req->_send_buf = data;
             uv_buf_t msg = uv_buf_init((char*)data->_buf, data->_len);
             int err_code = uv_udp_send(req,
@@ -165,7 +165,7 @@ namespace sj
             uv_buf_t * buf)
         {
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
-            send_recv_buf * data = uwc->_client->_buf_queue.GetData();
+            send_recv_buf * data = uwc->_client->_buf_stack.GetData();
             memset((void *)data->_buf, 0, UDP_BUF_MAX_SIZE);
             buf->base = data->_buf;
             buf->len = UDP_BUF_MAX_SIZE;
@@ -184,7 +184,7 @@ namespace sj
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
             uwc->_client->_handle->OnRecv(uwc->_client, rcvbuf->base, nread);
             send_recv_buf * data = (send_recv_buf *)rcvbuf->base;
-            uwc->_client->_buf_queue.PutData(data);
+            uwc->_client->_buf_stack.PutData(data);
         }
 
         static void SendCb(uv_udp_send_t* req, int status)
@@ -192,8 +192,8 @@ namespace sj
             send_param * param = (send_param *)req;
             param->_send_buf->_client->_handle->OnSent(param->_send_buf->_client,
                 param->_send_buf->_buf, param->_send_buf->_len);
-            param->_send_buf->_client->_buf_queue.PutData(param->_send_buf);
-            param->_send_buf->_client->_send_param_queue.PutData(param);
+            param->_send_buf->_client->_buf_stack.PutData(param->_send_buf);
+            param->_send_buf->_client->_send_param_stack.PutData(param);
         }
 
 		static void CloseCb(uv_handle_t * handle) 
@@ -224,8 +224,8 @@ namespace sj
         udp_client_handle * _handle; 
         std::string _err_info;
         
-        data_deque<send_recv_buf, 4> _buf_queue;
-        data_deque<send_param, 4> _send_param_queue;
+        data_stack<send_recv_buf, 4> _buf_stack;
+        data_stack<send_param, 4> _send_param_stack;
     };
 #undef CHECK_ERR_CODE
 }

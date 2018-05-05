@@ -34,10 +34,10 @@ namespace sj
     }
 
     template < class DATATYPE, int MAXSIZE >
-    class data_deque
+    class data_stack
     {
     public:
-        data_deque()
+        data_stack()
         {
             _start_pointer = new DATATYPE[MAXSIZE];
             for (int i = 0; i < MAXSIZE; ++ i)
@@ -45,7 +45,7 @@ namespace sj
                 _dd.push_back(_start_pointer + i);
             }
         }
-        ~data_deque()
+        ~data_stack()
         {
             _dd.clear();
             delete _start_pointer;
@@ -58,8 +58,8 @@ namespace sj
             {
                 return new DATATYPE;
             }
-            DATATYPE * temp = _dd.front();
-            _dd.pop_front();
+            DATATYPE * temp = _dd.back();
+            _dd.pop_back();
             return temp;
         }
 
