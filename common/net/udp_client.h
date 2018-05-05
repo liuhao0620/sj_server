@@ -1,4 +1,5 @@
 #pragma once
+#include <string.h>
 #include "net_base.h"
 
 namespace sj
@@ -34,7 +35,7 @@ namespace sj
             udp_client * _client;
         };
 
-        struct send_recv_buf
+        struct send_buf
         {
             char _buf[UDP_BUF_MAX_SIZE];
             udp_client * _client;
@@ -43,7 +44,7 @@ namespace sj
 
         struct send_param : public uv_udp_send_t
         {
-            send_recv_buf * _send_buf;
+            send_buf * _send_buf;
         };
     public:
         udp_client()
@@ -106,10 +107,10 @@ namespace sj
                 _err_info = "send buf is too long";
                 return -1;
             }
-            send_recv_buf * data = _buf_stack.GetData();
+            send_buf * data = _send_buf_stack.GetData();
             data->_client = this;
             data->_len = len;
-            memmove((void *)data->_buf, (const void *)buf, len);
+			memcpy((void *)data->_buf, (const void *)buf, len);
             _async_send.data = (void *)data;
             int err_code = uv_async_send(&_async_send);
             CHECK_ERR_CODE
@@ -125,7 +126,7 @@ namespace sj
         }
 
     private:
-        void SendInl(send_recv_buf * data)
+        void SendInl(send_buf * data)
         {
             send_param * req = _send_param_stack.GetData();
             req->_send_buf = data;
@@ -145,7 +146,7 @@ namespace sj
     private:
         static void AsyncSend(uv_async_t * handle)
         {
-            send_recv_buf * data = (send_recv_buf *)handle->data;
+            send_buf * data = (send_buf *)handle->data;
             data->_client->SendInl(data);
         }
 
@@ -165,9 +166,8 @@ namespace sj
             uv_buf_t * buf)
         {
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
-            send_recv_buf * data = uwc->_client->_buf_stack.GetData();
-            memset((void *)data->_buf, 0, UDP_BUF_MAX_SIZE);
-            buf->base = data->_buf;
+			memset((void *)uwc->_client->_recv_buf, 0, UDP_BUF_MAX_SIZE);
+            buf->base = uwc->_client->_recv_buf;
             buf->len = UDP_BUF_MAX_SIZE;
         }
 
@@ -183,8 +183,6 @@ namespace sj
             }
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
             uwc->_client->_handle->OnRecv(uwc->_client, rcvbuf->base, nread);
-            send_recv_buf * data = (send_recv_buf *)rcvbuf->base;
-            uwc->_client->_buf_stack.PutData(data);
         }
 
         static void SendCb(uv_udp_send_t* req, int status)
@@ -192,7 +190,7 @@ namespace sj
             send_param * param = (send_param *)req;
             param->_send_buf->_client->_handle->OnSent(param->_send_buf->_client,
                 param->_send_buf->_buf, param->_send_buf->_len);
-            param->_send_buf->_client->_buf_stack.PutData(param->_send_buf);
+            param->_send_buf->_client->_send_buf_stack.PutData(param->_send_buf);
             param->_send_buf->_client->_send_param_stack.PutData(param);
         }
 
@@ -224,8 +222,13 @@ namespace sj
         udp_client_handle * _handle; 
         std::string _err_info;
         
-        data_stack<send_recv_buf, 4> _buf_stack;
+        data_stack<send_buf, 4> _send_buf_stack;
         data_stack<send_param, 4> _send_param_stack;
+		//单线程接收时才可如此用
+		//之前用栈实现的出现AllocCb与RecvCb并不是成对调用
+		//导致的申请不返还
+		//开启多个线程接收时可以考虑每个线程分配一个接收
+		char _recv_buf[UDP_BUF_MAX_SIZE];				
     };
 #undef CHECK_ERR_CODE
 }

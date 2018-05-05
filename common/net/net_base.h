@@ -58,14 +58,14 @@ namespace sj
             {
                 return new DATATYPE;
             }
-            DATATYPE * temp = _dd.back();
+            DATATYPE * data = _dd.back();
             _dd.pop_back();
-            return temp;
+			return data;
         }
 
         void PutData(DATATYPE * data)
         {
-            if (data - _start_pointer >= MAXSIZE)
+            if (data < _start_pointer || data - _start_pointer >= MAXSIZE)
             {
                 delete data;
                 return;
