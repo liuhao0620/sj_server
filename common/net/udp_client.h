@@ -87,7 +87,7 @@ namespace sj
             CHECK_ERR_CODE
             err_code = uv_ip4_addr(_config._server_ip.c_str(), _config._server_port, &_server_addr);
             CHECK_ERR_CODE
-            err_code = uv_ip4_addr("0.0.0.0", _config._port, &_self_addr);
+            err_code = uv_ip4_addr(_config._server_ip.c_str(), _config._port, &_self_addr);
             CHECK_ERR_CODE
             err_code = uv_udp_init(&_loop, &_client);
             CHECK_ERR_CODE
