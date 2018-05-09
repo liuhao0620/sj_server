@@ -1,276 +1,346 @@
 #pragma once
 #include <map>
-#include <vector>
-#include "uv.h"
+#include <uv.h>
+#include "net_base.h"
 #include "common_def.h"
 #include "lock.h"
 #include "unique_id.h"
 
 namespace sj
 {
-    struct udp_session
-    {
-        unid_t sid;
-		union{
-			sockaddr addr;
-			unid_t addr_id;
-		}addr;
-    };
-
 	class udp_server;
-    class udp_server_handle
-    {
-    public:
-        virtual void OnRecv(udp_server* server, unid_t sid, char* buf, size_t len) = 0;
-    };
+	class udp_server_handle
+	{
+	public:
+		virtual void OnRecv(udp_server * server, unid_t sid, char * buf, size_t len) = 0;
+		virtual void OnSent(udp_server * server, unid_t sid, char * buf, size_t len) = 0;		
+	};
 
-    struct udp_server_t_with_handle : public uv_udp_t
-    {
-        udp_server_handle* _handle;
-		udp_server* _server;
-    };
+	struct udp_server_config
+	{
+		int _port;				//本机发送和接受的端口
+		int _thread_num = 4;	//服务器线程数，默认为4
+		std::string _name;		//服务器名称
+	};
 
-    class udp_server
-    {
-    public:
-        int Init(udp_server_handle* ush)
+#define CHECK_ERR_CODE \
+    if (err_code != 0) \
+    { \
+        _err_info = GetErrorInfo(err_code); \
+        return err_code; \
+    }    
+
+	class udp_server
+	{
+	private:
+		struct udp_session
+		{
+			unid_t _sid;
+			sockaddr _addr;
+		};
+
+        struct uv_udp_t_with_server : public uv_udp_t
         {
-            _server._handle = ush;
+            udp_server * _server;
+        };
+
+		struct recv_buf
+		{
+            char _buf[UDP_BUF_MAX_SIZE];
+		};
+
+        struct send_buf
+        {
+            udp_server * _server;
+			unid_t _sid;
+            size_t _len;
+            char _buf[UDP_BUF_MAX_SIZE];
+        };
+
+        struct send_param : public uv_udp_send_t
+        {
+            send_buf * _send_buf;
+        };
+
+		typedef std::map<unid_t, udp_session *> map_sid_session_t;
+		typedef std::map<unid_t, udp_session *> map_addr_session_t;
+	public:
+		udp_server()
+		{
 			_server._server = this;
-            return 0;
-        }
-        
-		int StartUp(const char* ip, int port)
-        {
-            sockaddr_in addr;
-            int ret_code = uv_ip4_addr(ip, port, &addr);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_init(uv_default_loop(), &_server);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_bind(&_server, (const sockaddr *)&addr, 0);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            ret_code = uv_udp_recv_start(&_server, 
-                udp_server::AllocCb,
-                udp_server::RecvCb);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-			// ret_code = uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-            ret_code = uv_queue_work(uv_default_loop(), 
-				new uv_work_t, 
-				udp_server::Run,
-				udp_server::AfterRun);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-            return 0;
-        }
+			_handle = NULL;
+			uv_loop_init(&_loop);
+		}
+
+		~udp_server()
+		{
+			uv_loop_close(&_loop);
+			rw_lock_wguard l(_session_map_lock);
+			for (map_sid_session_t::iterator iter = _session_map_by_sid.begin();
+				iter != _session_map_by_sid.end(); ++ iter)
+			{
+				_session_stack.PutData(iter->second);
+			}
+			_session_map_by_sid.clear();
+			_session_map_by_addr.clear();
+		}
+
+		bool Init(udp_server_config& cfg)
+		{
+			_config._port = cfg._port;
+			_config._thread_num = cfg._thread_num;
+			_config._name = cfg._name;
+			return 0;
+		}
+
+		void SetHandle(udp_server_handle* ush)
+		{
+			_handle = ush;
+		}
+
+		int StartUp()
+		{
+            if (_handle == NULL)
+            {
+                _err_info = "no hanle";
+                return -1;
+            }
+			_thread = new uv_thread_t[_config._thread_num];
+			if (_thread == NULL)
+			{
+				_err_info = "malloc uv_thread_t failed";
+				return -2;
+			}
+			int err_code = uv_async_init(&_loop, &_async_send, udp_server::AsyncSend);
+			CHECK_ERR_CODE
+			err_code = uv_async_init(&_loop, &_async_close, udp_server::AsyncClose);
+			CHECK_ERR_CODE
+			err_code = uv_ip4_addr("0.0.0.0", _config._port, &_self_addr);
+			CHECK_ERR_CODE
+			err_code = uv_udp_init(&_loop, &_server);
+			CHECK_ERR_CODE
+			err_code = uv_udp_bind(&_server, (const sockaddr *)&_self_addr, 0);
+			CHECK_ERR_CODE
+			err_code = uv_udp_recv_start(&_server, udp_server::AllocCb, udp_server::RecvCb);
+			CHECK_ERR_CODE
+			for (int i = 0; i < _config._thread_num; ++ i)
+			{
+				err_code = uv_thread_create(&(_thread[i]), udp_server::Run, (void *)this);
+				CHECK_ERR_CODE
+			}
+			return 0;
+		}
 
 		int Send(unid_t sid, const char * buf, size_t len)
 		{
-			udp_session* session = NULL;
-			if (!FindSession(sid, session))
-			{
-				//sid 不存在
-				return -1;
-			}
-			ASSERT(session != NULL);
-			uv_udp_send_t* req = new uv_udp_send_t;
-            uv_buf_t msg = uv_buf_init((char*)buf, len);
-            int ret_code = uv_udp_send(req,
-                  &_server,
-                  &msg,
-                  1,
-                  (const sockaddr*) &session->addr.addr,
-                  udp_server::SendCb);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) return ret_code;
-			return 0;
-		}
-
-		int Broadcast(std::vector<unid_t> sids, const char * buf, size_t len)
-		{
-            uv_buf_t msg = uv_buf_init((char*)buf, len);
-			for (size_t i = 0; i < sids.size(); ++ i)
-			{
-				udp_session* session = NULL;
-				if (!FindSession(sids[i], session)) { continue; }
-				ASSERT(session != NULL);
-				uv_udp_send_t* req = new uv_udp_send_t;
-				int ret_code = uv_udp_send(req,
-					&_server,
-					&msg,
-					1,
-					(const sockaddr*) &session->addr.addr,
-					udp_server::SendCb);
-				ASSERT(ret_code == 0);
-				if (ret_code != 0) { continue; }
-			}
-			return 0;
-		}
-
-		int Broadcast(const char * buf, size_t len)
-		{
-			uv_buf_t msg = uv_buf_init((char*)buf, len);
-			for (map_sid_session_t::iterator iter = _sid_session_map.begin(); 
-				iter != _sid_session_map.end(); ++ iter)
-			{
-				udp_session* session = iter->second;
-				ASSERT(session != NULL);
-				if (session == NULL) { continue; }
-				uv_udp_send_t* req = new uv_udp_send_t;
-				int ret_code = uv_udp_send(req,
-					&_server,
-					&msg,
-					1,
-					(const sockaddr*) &session->addr.addr,
-					udp_server::SendCb);
-				ASSERT(ret_code == 0);
-				if (ret_code != 0) { continue; }
-			}
-			return 0;
-		}
-        
-		int Stop()
-        {
-            int ret_code = uv_udp_recv_stop(&_server);
-            ASSERT(ret_code == 0);
-			if (ret_code != 0) { return ret_code; }
-			uv_close((uv_handle_t *)&_server, udp_server::CloseCb);
-            rw_lock_wguard _l(_session_map_lock);
-			for (map_sid_session_t::iterator iter = _sid_session_map.begin();
-				iter != _sid_session_map.end();
-				++ iter)
-			{
-				delete iter->second;
-			}
-			_sid_session_map.clear();
-			_addr_session_map.clear();
-			return 0;
-        }
-
-    private:
-        static void AllocCb(uv_handle_t* handle, 
-            size_t suggested_size, 
-            uv_buf_t* buf)
-        {
-            buf->base = new char[1000];
-            buf->len = 1000;
-        }
-
-        static void RecvCb(uv_udp_t* handle,
-            ssize_t nread,
-            const uv_buf_t* rcvbuf,
-            const sockaddr* addr,
-            unsigned flags)
-        {
-            if (nread <= 0)
+            if (len > UDP_BUF_MAX_SIZE)
             {
-                return;
+                _err_info = "send buf is too long";
+                return -1;
             }
-			if (handle == NULL)
+			if (sid == 0)
 			{
+				_err_info = "send error : invalid sid";
+				return -2;
+			}
+			send_buf * data = _send_buf_stack.GetData();
+			data->_sid = sid;
+            data->_server = this;
+            data->_len = len;
+			memcpy((void *)data->_buf, (const void *)buf, len);
+			_async_send.data = (void *)data;
+            int err_code = uv_async_send(&_async_send);
+            CHECK_ERR_CODE
+			return 0;
+		}
+
+		int Close()
+		{
+            _async_close.data = (void *)this;
+            int err_code = uv_async_send(&_async_close);
+            CHECK_ERR_CODE
+			return 0;
+		}
+
+		bool DelSession(unid_t sid)
+		{
+			rw_lock_wguard l(_session_map_lock);
+			map_sid_session_t::iterator iter = _session_map_by_sid.find(sid);
+			if (iter == _session_map_by_sid.end())
+			{
+				return false;
+			}
+			_session_map_by_addr.erase(Sockaddr2Unid(&(iter->second->_addr)));
+			_session_stack.PutData(iter->second);
+			_session_map_by_sid.erase(sid);
+			return true;
+		}
+	private:
+		bool FindSockaddr(const unid_t sid, sockaddr & addr)
+		{
+			rw_lock_rguard l(_session_map_lock);
+			map_sid_session_t::iterator iter = _session_map_by_sid.find(sid);
+			if (iter == _session_map_by_sid.end())
+			{
+				return false;
+			}
+			memcpy((void *)&addr, (const void *)&(iter->second->_addr), sizeof(sockaddr));
+			return true;
+		}
+
+		bool FindSid(const sockaddr * addr, unid_t & sid)
+		{
+			if (addr == NULL)
+			{
+				return false;
+			}
+			rw_lock_rguard l(_session_map_lock);
+			map_addr_session_t::iterator iter = _session_map_by_addr.find(Sockaddr2Unid(addr));
+			if (iter == _session_map_by_addr.end())
+			{
+				return false;
+			}
+			sid = iter->second->_sid;
+			return true;
+		}
+
+		bool AddSession(const sockaddr * addr, unid_t & sid)
+		{
+			rw_lock_wguard l(_session_map_lock);
+			map_addr_session_t::iterator iter = _session_map_by_addr.find(Sockaddr2Unid(addr));
+			if (iter != _session_map_by_addr.end())
+			{
+				sid = iter->second->_sid;
+				return false;
+			}
+
+			udp_session * session = _session_stack.GetData();
+			session->_sid = GetUniqueID(UIT_UDP_SID);
+			memcpy((void *)&(session->_addr), (const void *)addr, sizeof(sockaddr));
+			_session_map_by_sid.insert(std::make_pair(session->_sid, session));
+			_session_map_by_addr.insert(std::make_pair(Sockaddr2Unid(addr), session));
+			sid = session->_sid;
+			return true;
+		}
+
+		void SendInl(send_buf * data)
+		{
+			sockaddr addr;
+			if (!FindSockaddr(data->_sid, addr))
+			{
+				_send_buf_stack.PutData(data);
 				return;
 			}
-			udp_server_t_with_handle* uwh = static_cast<udp_server_t_with_handle *>(handle); 
-            udp_session* session = NULL;
-            if (!uwh->_server->FindSession(addr, session))
-			{
-				uwh->_server->AddSession(addr, session);
-			}
-			ASSERT(session != NULL);
-            uwh->_handle->OnRecv(uwh->_server, session->sid, rcvbuf->base, nread);
-            delete rcvbuf->base;
+            send_param * req = _send_param_stack.GetData();
+            req->_send_buf = data;
+            uv_buf_t msg = uv_buf_init((char*)data->_buf, data->_len);
+            int err_code = uv_udp_send(req,
+                &_server,
+                &msg,
+                1,
+                (const sockaddr*) &addr,
+                udp_server::SendCb);
+            if (err_code != 0)
+            {
+                _err_info = GetErrorInfo(err_code);
+            }
+		}
+
+	private:
+		static void AsyncSend(uv_async_t * handle)
+        {
+            send_buf * data = (send_buf *)handle->data;
+            data->_server->SendInl(data);
         }
+
+        static void AsyncClose(uv_async_t * handle)
+        {
+            udp_server * server = (udp_server *)handle->data;
+            int err_code = uv_udp_recv_stop(&(server->_server));
+            if (err_code != 0)
+            {
+                server->_err_info = GetErrorInfo(err_code);
+            }
+            uv_close((uv_handle_t *)(&(server->_server)), udp_server::CloseCb);
+        }
+        
+        static void AllocCb(uv_handle_t * handle, 
+            size_t suggested_size, 
+            uv_buf_t * buf)
+        {
+            uv_udp_t_with_server * uws = (uv_udp_t_with_server *)handle;
+            recv_buf * data = uws->_server->_recv_buf_stack.GetData();
+			memset((void *)data->_buf, 0, UDP_BUF_MAX_SIZE);
+            buf->base = data->_buf;
+            buf->len = UDP_BUF_MAX_SIZE;
+		}
+
+        static void RecvCb(uv_udp_t * handle,
+            ssize_t nread,
+            const uv_buf_t * rcvbuf,
+            const sockaddr * addr,
+            unsigned flags)
+        {
+			uv_udp_t_with_server * uws = (uv_udp_t_with_server *)handle;
+			do
+			{
+				if (nread <= 0)
+				{
+					break;
+				}
+				unid_t sid = 0;
+				if (!uws->_server->FindSid(addr, sid))
+				{
+					uws->_server->AddSession(addr, sid);
+				}
+				uws->_server->_handle->OnRecv(uws->_server, sid, rcvbuf->base, nread);
+			} while (false);
+			uws->_server->_recv_buf_stack.PutData((recv_buf *)rcvbuf->base);
+		}
 
         static void SendCb(uv_udp_send_t* req, int status)
         {
-			delete req;
+            send_param * param = (send_param *)req;
+            param->_send_buf->_server->_handle->OnSent(param->_send_buf->_server,
+                param->_send_buf->_sid, param->_send_buf->_buf, param->_send_buf->_len);
+            param->_send_buf->_server->_send_buf_stack.PutData(param->_send_buf);
+            param->_send_buf->_server->_send_param_stack.PutData(param);
         }
 
-		static void CloseCb(uv_handle_t* handle) 
+		static void CloseCb(uv_handle_t * handle) 
 		{
 			uv_is_closing(handle);
 		}
 
-		static void Run(uv_work_t * req)
+		static void Run(void * data)
 		{
-			ASSERT(uv_run(uv_default_loop(), UV_RUN_DEFAULT) == 0);
+            udp_server * server = (udp_server *)data;
+            int err_code = uv_run(&(server->_loop), UV_RUN_DEFAULT);
+            if (err_code != 0)
+            {
+                server->_err_info = GetErrorInfo(err_code);
+            }
 		}
+	private:
+		uv_loop_t _loop;
+        uv_async_t _async_send;
+        uv_async_t _async_close;
+		uv_thread_t * _thread;
+		sockaddr_in _self_addr;
+		
+		map_sid_session_t _session_map_by_sid;
+		map_addr_session_t _session_map_by_addr;
+		rw_lock _session_map_lock;
 
-		static void AfterRun(uv_work_t * req, int status)
-		{
+		uv_udp_t_with_server _server;
+		udp_server_config _config;
+		udp_server_handle * _handle;
+		std::string _err_info;
 
-		}
-
-		bool FindSession(const unid_t sid, udp_session*& session)
-		{
-			rw_lock_rguard _l(_session_map_lock);
-			map_sid_session_t::iterator iter = _sid_session_map.find(sid);
-			if (iter == _sid_session_map.end())
-			{
-				return false;
-			}
-			session = iter->second;
-			return true;
-		}
-
-		bool FindSession(const sockaddr* addr, udp_session*& session)
-		{
-			rw_lock_rguard _l(_session_map_lock);
-			unid_t addr_id = *(unid_t *)addr;
-			map_addr_session_t::iterator iter = _addr_session_map.find(addr_id);
-			if (iter == _addr_session_map.end())
-			{
-				return false;
-			}
-			session = iter->second;
-			return true;
-		}
-
-		//如果已经存在,则返回false,不存在则增加, 返回true
-		//无论存在与否,session都会返回该地址对应的udp_session
-		bool AddSession(const sockaddr* addr, udp_session*& session)
-		{
-			rw_lock_wguard _l(_session_map_lock);
-			unid_t addr_id = *(unid_t *)addr;
-			map_addr_session_t::iterator iter = _addr_session_map.find(addr_id);
-			if (iter != _addr_session_map.end())
-			{
-				session = iter->second;
-				return false;
-			}
-			session = new udp_session;
-			session->sid = GetUniqueID(UIT_UDP_SID);
-			session->addr.addr_id = addr_id;
-			_sid_session_map.insert(std::make_pair(session->sid, session));
-			_addr_session_map.insert(std::make_pair(session->addr.addr_id, session));
-			return true;
-		}
-
-	public:
-		bool DelSession(unid_t sid)
-		{
-			rw_lock_wguard _l(_session_map_lock);
-			map_sid_session_t::iterator iter = _sid_session_map.find(sid);
-			if (iter == _sid_session_map.end())
-			{
-				return false;
-			}
-			_addr_session_map.erase(iter->second->addr.addr_id);
-			delete iter->second;
-			_sid_session_map.erase(sid);
-			return true;
-		}
-
-    private:
-        typedef std::map<unid_t, udp_session*> map_sid_session_t;
-        typedef std::map<unid_t, udp_session*> map_addr_session_t;
-        map_sid_session_t _sid_session_map;
-        map_addr_session_t _addr_session_map;
-        rw_lock _session_map_lock;
-
-        udp_server_t_with_handle _server;
-    };
+		data_stack<udp_session, 1000> _session_stack;
+		data_stack<send_buf, 4> _send_buf_stack;
+		data_stack<send_param, 4> _send_param_stack;
+		data_stack<recv_buf, 4> _recv_buf_stack;
+	};
+#undef CHECK_ERR_CODE
 }

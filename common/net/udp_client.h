@@ -35,11 +35,16 @@ namespace sj
             udp_client * _client;
         };
 
-        struct send_buf
+        struct recv_buf
         {
             char _buf[UDP_BUF_MAX_SIZE];
+        };
+
+        struct send_buf
+        {
             udp_client * _client;
             size_t _len;
+            char _buf[UDP_BUF_MAX_SIZE];
         };
 
         struct send_param : public uv_udp_send_t
@@ -166,8 +171,9 @@ namespace sj
             uv_buf_t * buf)
         {
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
-			memset((void *)uwc->_client->_recv_buf, 0, UDP_BUF_MAX_SIZE);
-            buf->base = uwc->_client->_recv_buf;
+            recv_buf * data = uwc->_client->_recv_buf_stack.GetData();
+			memset((void *)data->_buf, 0, UDP_BUF_MAX_SIZE);
+            buf->base = data->_buf;
             buf->len = UDP_BUF_MAX_SIZE;
         }
 
@@ -177,12 +183,16 @@ namespace sj
             const sockaddr * addr,
             unsigned flags)
         {
-            if (nread <= 0)
-            {
-                return;
-            }
             uv_udp_t_with_client * uwc = (uv_udp_t_with_client *)handle;
-            uwc->_client->_handle->OnRecv(uwc->_client, rcvbuf->base, nread);
+            do
+            {
+                if (nread <= 0)
+                {
+                    break;
+                }
+                uwc->_client->_handle->OnRecv(uwc->_client, rcvbuf->base, nread);
+            } while(false);
+            uwc->_client->_recv_buf_stack.PutData((recv_buf *)rcvbuf->base);
         }
 
         static void SendCb(uv_udp_send_t* req, int status)
@@ -224,11 +234,7 @@ namespace sj
         
         data_stack<send_buf, 4> _send_buf_stack;
         data_stack<send_param, 4> _send_param_stack;
-		//单线程接收时才可如此用
-		//之前用栈实现的出现AllocCb与RecvCb并不是成对调用
-		//导致的申请不返还
-		//开启多个线程接收时可以考虑每个线程分配一个接收
-		char _recv_buf[UDP_BUF_MAX_SIZE];				
+        data_stack<recv_buf, 4> _recv_buf_stack;			
     };
 #undef CHECK_ERR_CODE
 }

@@ -2,11 +2,17 @@
 #include <string>
 #include <uv.h>
 #include "lock.h"
+#include "common_def.h"
 
 #define UDP_BUF_MAX_SIZE (1000)
 
 namespace sj
 {
+    unid_t Sockaddr2Unid(const sockaddr * addr)
+    {
+        return *(unid_t *)addr;
+    }
+
     std::string GetErrorInfo(int err_code)
     {
         if (err_code == 0)
