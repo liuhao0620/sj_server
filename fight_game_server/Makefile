@@ -2,7 +2,7 @@ CPP=g++
 CPPFLAGS= -g -std=c++11
 INCS= -I../common/net -I../common/include -I../common/log -I../common/protoc
 TARGET=fight_gs
-OBJS=fight_game_server.o message_handler.o
+OBJS=fight_game_server.o message_handler.o fgs.o
 LIBS=/usr/local/lib/libuv.a /usr/local/lib/libprotobuf.a -lpthread
 PBOBJS=../common/protoc/gprotoc/internal_protocol.pb.o ../common/protoc/gprotoc/external_protocol.pb.o
 

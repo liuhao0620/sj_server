@@ -9,7 +9,8 @@ class test_uc_handle : public sj::udp_client_handle
 public:
     virtual void OnRecv(sj::udp_client* client, char* buf, size_t len)
     {
-        LOG_DEBUG("recv ", buf, " from server");
+        ARRAY2PB(buf, len, proto_buf, pb)
+        LOG_DEBUG("recv ", pb.pb_type(), " from server");
     }
 
     virtual void OnSent(sj::udp_client* client, char* buf, size_t len)
